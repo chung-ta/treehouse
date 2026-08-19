@@ -27,7 +27,7 @@ var (
 
 var returnCmd = &cobra.Command{
 	Use:   "return [path]",
-	Short: "Terminate lingering processes and return a worktree",
+	Short: "Finish a task: remove its worktree, keeping the branch",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("if-lease-id") && returnIfLeaseID == "" {
 			return fmt.Errorf("--if-lease-id cannot be empty")
@@ -78,13 +78,13 @@ var returnCmd = &cobra.Command{
 			return fmt.Errorf("failed to return worktree: %w", err)
 		}
 
-		fmt.Fprintln(os.Stderr, "🌳 Worktree returned to pool.")
+		fmt.Fprintln(os.Stderr, "🌳 Worktree removed. Its branch is still in the repository.")
 		return nil
 	},
 }
 
 func init() {
-	returnCmd.Flags().BoolVar(&returnForce, "force", false, "Clean, reset, and return without prompting")
+	returnCmd.Flags().BoolVar(&returnForce, "force", false, "Remove the worktree without prompting, discarding uncommitted changes")
 	returnCmd.Flags().StringVar(&returnIfLeaseID, "if-lease-id", "", "Return only if the current lease has this identity")
 	returnCmd.Flags().StringVar(&returnIfLeaseHolder, "if-lease-holder", "", "Return only if the current lease has this holder")
 	rootCmd.AddCommand(returnCmd)
@@ -101,7 +101,7 @@ func confirmWorktreeReturn(wtPath string) error {
 	if !returnForce {
 		dirty, _ := git.IsDirty(wtPath)
 		if dirty {
-			ok, err := ui.Confirm("Worktree has uncommitted changes. Clean and return?", true)
+			ok, err := ui.Confirm("Worktree has uncommitted changes. Discard them and remove the worktree?", true)
 			if err != nil || !ok {
 				return errReturnAborted
 			}
@@ -110,13 +110,10 @@ func confirmWorktreeReturn(wtPath string) error {
 	return nil
 }
 
+// finalizeWorktreeReturn prepares a worktree for removal. There is no detach
+// step: the worktree directory is about to be deleted, and its branch stays in
+// the repository either way.
 func finalizeWorktreeReturn(wtPath string) error {
-	if !returnForce {
-		if err := git.DetachWorktree(wtPath); err != nil {
-			return fmt.Errorf("failed to detach worktree HEAD: %w", err)
-		}
-	}
-
 	killLingeringProcesses(wtPath)
 	return nil
 }
@@ -132,7 +129,7 @@ func resolveWorktreePath(args []string) (string, error) {
 }
 
 func resolveReturnPoolDir(wtPath string, explicitPath bool) (string, error) {
-	pathPoolDir := filepath.Dir(filepath.Dir(wtPath))
+	pathPoolDir := filepath.Dir(wtPath)
 	entry, err := pool.FindByPath(pathPoolDir, wtPath)
 	if err != nil {
 		return "", err

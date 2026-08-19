@@ -4,7 +4,6 @@ package pool
 
 import (
 	"os"
-	"path/filepath"
 	"syscall"
 	"testing"
 )
@@ -50,24 +49,25 @@ func TestWriteState_NewFileRespectsUmask(t *testing.T) {
 	}
 }
 
-func TestList_CorruptRecoveryFailsClosedWhenSlotUnreadable(t *testing.T) {
+func TestList_CorruptRecoveryFailsClosedWhenWorktreeUnreadable(t *testing.T) {
 	poolDir := t.TempDir()
-	wtPath := makeFakeWorktree(t, poolDir, "1", "myrepo")
-	slotDir := filepath.Dir(wtPath)
+	// The worktree directory sits directly inside the pool, so it - not a
+	// wrapper directory - is what recovery must fail closed on.
+	wtPath := makeFakeWorktree(t, poolDir, "1")
 	if err := os.WriteFile(stateFilePath(poolDir), nil, 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if err := os.Chmod(slotDir, 0); err != nil {
+	if err := os.Chmod(wtPath, 0); err != nil {
 		t.Fatalf("Chmod unreadable: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := os.Chmod(slotDir, 0755); err != nil {
+		if err := os.Chmod(wtPath, 0755); err != nil {
 			t.Fatalf("restore permissions: %v", err)
 		}
 	})
 
 	if _, err := List(poolDir); err == nil {
-		t.Fatal("List with unreadable corrupt-state recovery slot returned nil error")
+		t.Fatal("List with unreadable corrupt-state recovery worktree returned nil error")
 	}
 
 	data, err := os.ReadFile(stateFilePath(poolDir))

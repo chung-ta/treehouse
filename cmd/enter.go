@@ -17,13 +17,14 @@ import (
 var enterCmd = &cobra.Command{
 	Use:   "enter <name>",
 	Short: "Open a subshell in an existing worktree by name, even if in use",
-	Long: `Open a subshell in an existing pool worktree identified by its name
-(the number shown by 'treehouse status'), including worktrees that are
+	Long: `Open a subshell in an existing worktree identified by its name
+(the task slug shown by 'treehouse status'), including worktrees that are
 already in use.
 
-Unlike 'get', enter does not acquire, reset, or return the worktree: it
-drops you into the directory and leaves all pool state untouched when you
-exit. Use it to attach to a worktree another agent is already using.
+Unlike 'get', enter does not create or remove anything: it drops you into
+the directory, on whatever branch the worktree is already on, and leaves
+all state untouched when you exit. Use it to resume a task, or to attach
+to a worktree another agent is already using.
 
 Pass --print-path to print only the worktree's absolute path to stdout
 instead of opening a subshell. A shell can wrap this to change its own

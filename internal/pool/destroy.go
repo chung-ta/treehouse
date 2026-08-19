@@ -511,7 +511,7 @@ func restoreOriginalOwnerReservation(wt *WorktreeEntry, reservation destroyReser
 }
 
 // removeManagedWorktree deletes a worktree's git registration (when its backing
-// repository is still present) and its numbered container directory. git removal
+// repository is still present) and its task-named directory. git removal
 // uses --force because destroy deliberately removes dirty, unmerged, or
 // unverified worktrees once the caller has opted in.
 func removeManagedWorktree(repoRoot, path string) error {
@@ -529,11 +529,11 @@ func removeManagedWorktree(repoRoot, path string) error {
 			return fmt.Errorf("git refused to remove worktree: %w", err)
 		}
 	}
-	container, err := removableWorktreeContainer(path)
+	dir, err := removableWorktreeDir(path)
 	if err != nil {
 		return fmt.Errorf("refusing unsafe cleanup path: %w", err)
 	}
-	if err := os.RemoveAll(container); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("could not remove worktree directory: %w", err)
 	}
 	return nil
@@ -555,11 +555,11 @@ func resolvePoolRepoRoot(targets []WorktreeEntry) string {
 }
 
 func measureDestroySize(target *DestroyTarget) {
-	container, err := removableWorktreeContainer(target.Path)
+	dir, err := removableWorktreeDir(target.Path)
 	if err != nil {
 		return
 	}
-	if bytes, err := dirSize(container); err == nil {
+	if bytes, err := dirSize(dir); err == nil {
 		target.Bytes = bytes
 	}
 }

@@ -18,26 +18,34 @@ Or... are you starting a new worktree for every agent session, losing all your i
   <img src="https://raw.githubusercontent.com/kunchenguid/treehouse/main/demo.gif" alt="treehouse demo" width="800" />
 </p>
 
-Treehouse helps you manage a pool of reusable, isolated worktrees so each of your agents gets its own environment instantly — no cloning, no conflicts, no coordination overhead.
+Treehouse gives every task its own isolated worktree and branch, so each of your agents gets its own environment instantly — no cloning, no conflicts, no coordination overhead.
 
-- **Instant isolation** — `treehouse` puts you into a clean worktree with zero hassel.
-- **Reusable worktrees** — worktrees are preserved in a pool when you're done, with dependencies and build cache intact, ready for the next agent.
+- **A worktree per task** — `treehouse "fix login redirect"` puts you in a clean worktree at `<root>/<repo>/fix-login`, checked out on branch `fix-login`.
+- **PR-ready** — the worktree is on a real branch from the moment it exists, so you can commit, push, and open a PR without any setup.
 - **Conflict-free** — automatic detection of in-use worktrees and your agents never step on each other's toes.
 
 ## Quick Start
 
 ```sh
-$ cd myproject                 # start in your repo as usual
-$ treehouse                    # get a worktree and drop into a subshell
-🌳 Entered worktree at ~/.treehouse/myproject-a1b2c3/1/myproject. Type 'exit' to return.
+$ cd myproject                          # start in your repo as usual
+$ treehouse "fix login redirect"        # a worktree + branch for this task
+🌳 Entered worktree at ~/.treehouse/myproject/fix-login. Type 'exit' to leave.
+🌳 On branch fix-login.
 
-# You're now in an isolated worktree.
-# Run your AI agent, make changes, do whatever you need.
+# You're now in an isolated worktree, on a branch named for the task.
+# Run your AI agent, make changes, commit, push, open a PR.
 
-$ exit                         # exit the subshell when you're done
-🌳 Terminated lingering processes: opencode (pid 12345)
-🌳 Worktree returned to pool.
+$ exit                                  # leave the subshell
+🌳 Worktree kept at ~/.treehouse/myproject/fix-login (branch fix-login).
+🌳 Resume it with 'treehouse enter ...', or finish it with 'treehouse return ...'.
+
+$ treehouse return ~/.treehouse/myproject/fix-login   # done with the task
+🌳 Worktree removed. Its branch is still in the repository.
 ```
+
+The description is required and must be at least 10 characters. Its first 10
+characters, with spaces turned into dashes, become both the directory name and
+the branch name.
 
 ## Install
 
@@ -84,35 +92,37 @@ make install
 
 ## How It Works
 
-Treehouse manages a **pool of git worktrees** per repository, stored under the configured treehouse root.
-The default treehouse root is `~/.treehouse/`.
+Treehouse manages one **worktree per task** per repository, stored under the configured treehouse root.
+The default treehouse root is `~/.treehouse/`, giving `~/.treehouse/<repo>/<task>`.
 
 ```
-  treehouse
+  treehouse "fix login redirect"
       │
       ▼
   Find repo root
+      │
+      ▼
+  Slug the description
+  ("fix login redirect" -> "fix-login")
       │
       ▼
   git fetch origin
       │
       ▼
   ┌───────────────────────────────────────┐
-  │  Scan pool for available worktree     │
-  │  (not leased, not in-use, not dirty)  │
+  │  Does a worktree for this task exist? │
   └──────────┬────────────────────────────┘
              │
         ┌────┴────┐
-        │  Found? │
+        │  Yes?   │
         └────┬────┘
          yes/ \no
            /   \
           ▼     ▼
-   Reset to   Create new worktree
-   latest     (detached HEAD at
-   default    latest default
-   branch     branch)
-              & add to pool
+   Refuse and  Create <root>/<repo>/fix-login
+   point you   on branch fix-login (created at
+   at it       the default branch tip, or resumed
+               if the branch already exists)
           \   /
            \ /
             ▼
@@ -123,13 +133,12 @@ The default treehouse root is `~/.treehouse/`.
      exit subshell
            │
            ▼
-  Terminate lingering worktree
-  processes, reset worktree,
-  & return to pool
-  (ready for next agent)
+  Worktree is kept, on its branch
+  (resume with `enter`, finish with `return`)
 ```
 
-- **Detached HEAD** — worktrees use detached HEAD mode, reset to whichever of the local or remote default branch is further ahead, avoiding branch name conflicts entirely.
+- **A branch per task** — each worktree is checked out on a branch named for its task, created at whichever of the local or remote default branch is further ahead. Asking for a task whose branch already exists resumes that branch instead of starting a second one.
+- **The branch outlives the worktree** — `treehouse return` removes the worktree directory but never the branch, so commits and open PRs survive finishing a task.
 - **No daemon** - all operations are inline CLI commands.
   Pool state is a small on-disk file, written under a lock by each command.
 - **In-use detection** — treehouse scans running processes and short-lived owner reservations to determine which worktrees are in-use. Reservations are persisted only while `get`, `destroy`, and `prune` lifecycle work is running.
@@ -137,7 +146,7 @@ The default treehouse root is `~/.treehouse/`.
 - **State recovery** - treehouse writes pool state atomically via a temp file and replacement.
   If an existing state file is empty or truncated, treehouse warns, rebuilds entries from worktrees still on disk, and marks those entries leased until you verify them with `treehouse status`.
 - **Dirty detection** - treehouse treats tracked changes and untracked files as dirty, even when repository config hides untracked files from normal `git status` output.
-- **Safe pruning** - By default, `treehouse prune` removes only idle managed worktrees whose HEAD is already merged into the default branch and whose working tree is clean.
+- **Safe pruning** - By default, `treehouse prune` removes only idle managed worktrees whose HEAD is already merged into the default branch and whose working tree is clean, which for a task worktree means its branch has landed.
   `treehouse prune --all` applies the same safety checks across every managed pool under the user-level treehouse root.
   Backing-repository-missing orphans are reported by default; `--prune-orphans` includes them as unverified prune candidates, and `--yes` is required before deletion.
   It is a dry run unless you pass `--yes`.
@@ -147,11 +156,11 @@ The default treehouse root is `~/.treehouse/`.
 | Command                    | Description                                          |
 | -------------------------- | ---------------------------------------------------- |
 | `treehouse`                | Get a worktree and open a subshell (alias for `get`) |
-| `treehouse get`            | Acquire a worktree from the pool                     |
-| `treehouse get --lease`    | Durably lease a worktree without a subshell; print its path |
-| `treehouse enter <name>`   | Open a subshell in an existing worktree by name (the number from `status`), even if it is in use; pool state is left untouched |
-| `treehouse status`         | Show pool status (highlights leased and current worktrees) |
-| `treehouse return [path]`  | Release any lease, terminate lingering worktree processes, and return it to the pool |
+| `treehouse get <description>` | Create a worktree and branch for a task (min 10 characters) |
+| `treehouse get --lease <description>` | Durably lease a task worktree without a subshell; print its path |
+| `treehouse enter <name>`   | Open a subshell in an existing worktree by task name (from `status`), even if it is in use; state is left untouched |
+| `treehouse status`         | Show every task worktree and its branch (highlights leased and current worktrees) |
+| `treehouse return [path]`  | Finish a task: release any lease, terminate lingering processes, and remove the worktree, keeping its branch |
 | `treehouse prune`          | Dry-run removal of stale idle worktrees in the current repo pool |
 | `treehouse prune --all`    | Dry-run removal of stale idle worktrees across every managed pool |
 | `treehouse destroy <path>` | Dry-run removal of one worktree (safe by default; `--yes` to execute) |
@@ -168,7 +177,7 @@ The default treehouse root is `~/.treehouse/`.
 | `get`     | `--json` | Print `path`, `lease_id`, `lease_holder`, and `leased_at` as JSON (requires `--lease`) |
 | `enter`   | `--print-path` | Print only the worktree's absolute path to stdout instead of opening a subshell (for `cd "$(treehouse enter --print-path 1)"`) |
 | `status`  | `--json` | Print worktree status and lease metadata as JSON |
-| `return`  | `--force` | Clean, reset, and return without prompting |
+| `return`  | `--force` | Remove the worktree without prompting, discarding uncommitted changes |
 | `return`  | `--if-lease-id` | Return only if the current lease has the expected per-acquisition identity |
 | `return`  | `--if-lease-holder` | Return only if the current lease has the expected holder |
 | `prune`   | `--yes`   | Delete listed prune candidates instead of doing a dry run |
@@ -184,8 +193,8 @@ The default treehouse root is `~/.treehouse/`.
 
 ### Leasing a worktree (no subshell)
 
-`treehouse get` normally opens an interactive subshell whose lifetime is the hold: when the shell exits, the worktree returns to the pool.
-That is awkward for callers that need a worktree to persist as a permanent home with no long-lived process inside it.
+`treehouse get` normally opens an interactive subshell. The worktree outlives that shell, but the shell is what marks it in use.
+That is awkward for callers that need a worktree reserved as a permanent home with no long-lived process inside it.
 
 `treehouse get --lease` is the non-interactive, durable alternative:
 
@@ -210,7 +219,7 @@ treehouse get --lease --lease-holder automation-A --json
 
 `treehouse status --json` returns an array with `name`, `path`, `status`, `lease_id`, `lease_holder`, `leased_at`, and `processes`. Non-leased entries use empty lease strings and a `null` timestamp. State files written before lease identities remain readable; their existing leases have an empty `lease_id` until released and acquired again.
 
-Release a lease with `treehouse return <path>`, which clears the lease, terminates any lingering processes, resets the worktree, and returns it to the pool.
+Release a lease with `treehouse return <path>`, which clears the lease, terminates any lingering processes, and removes the worktree directory. The task's branch is left in the repository.
 When you pass an explicit path, `treehouse return` can run from outside the repository because it resolves the managed pool from that worktree path.
 
 For retry-safe automation, condition the return on the identity from allocation or status:
@@ -306,14 +315,14 @@ Create a repo config file with `treehouse init`, or add one manually:
 **User-level:** `~/.config/treehouse/config.toml`
 
 ```toml
-# Maximum number of worktrees in the pool
+# Maximum number of task worktrees that may exist at once for one repository
 max_trees = 16
 
-# Optional worktree root directory.
+# Optional worktree root directory. Worktrees live at <root>/<repo>/<task>.
 # Empty uses $HOME/.treehouse.
 # Relative paths are resolved from the repo root for repo-scoped commands.
 # Use an absolute user-level root for treehouse prune --all.
-# root = "$HOME/worktrees"
+# root = "$HOME/development/worktree"
 ```
 
 The repo-level config takes precedence for repo-safe settings.

@@ -142,6 +142,44 @@ func AddWorktree(repoRoot, path, branch string) error {
 	return err
 }
 
+// AddWorktreeWithBranch creates a worktree at path checked out on newBranch,
+// a branch created at the tip of baseBranch. Unlike AddWorktree it leaves the
+// worktree on a real branch so the work can be pushed and turned into a PR
+// without any further setup.
+func AddWorktreeWithBranch(repoRoot, path, newBranch, baseBranch string) error {
+	_, err := runGit(repoRoot, "worktree", "add", "-b", newBranch, path, branchRef(repoRoot, baseBranch))
+	return err
+}
+
+// AddWorktreeOnBranch creates a worktree at path checked out on an existing
+// branch. It is how a task is resumed after its worktree was returned: the
+// branch outlives the worktree, so a later worktree for the same task picks up
+// exactly where the previous one left off.
+func AddWorktreeOnBranch(repoRoot, path, branch string) error {
+	_, err := runGit(repoRoot, "worktree", "add", path, branch)
+	return err
+}
+
+// BranchExists reports whether a local branch of this name already exists.
+// Callers check this before creating a worktree so a name clash fails with an
+// explanation rather than a raw git error.
+func BranchExists(repoRoot, branch string) bool {
+	return refExists(repoRoot, "refs/heads/"+branch)
+}
+
+// CurrentBranch returns the branch checked out in a worktree, or an empty
+// string when its HEAD is detached.
+func CurrentBranch(worktreePath string) (string, error) {
+	out, err := runGit(worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if out == "HEAD" {
+		return "", nil
+	}
+	return out, nil
+}
+
 func RemoveWorktree(repoRoot, path string) error {
 	_, err := runGit(repoRoot, "worktree", "remove", "--force", path)
 	return err
