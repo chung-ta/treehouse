@@ -2,8 +2,15 @@
 # Place repo-safe settings at <repo_root>/treehouse.toml.
 # Place executable hooks only in ~/.config/treehouse/config.toml.
 
-# Maximum number of worktrees in the pool
+# Maximum number of task worktrees that may exist at once for one repository
 max_trees = 16
+
+# Optional worktree root directory. Worktrees live at <root>/<repo>/<task>,
+# e.g. ~/development/worktree/myrepo/fix-login on branch fix-login.
+# Empty uses $HOME/.treehouse.
+# Relative paths are resolved from the repo root for repo-scoped commands.
+# Use an absolute user-level root for treehouse prune --all.
+# root = "$HOME/development/worktree"
 
 # Lifecycle hooks are ignored in repo-level config for safety.
 # Each list runs sequentially in the worktree directory via the OS shell.

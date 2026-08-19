@@ -24,8 +24,10 @@ const (
 
 // WorktreeStatus describes one managed worktree as reported by List.
 type WorktreeStatus struct {
-	Name      string
-	Path      string
+	Name string
+	Path string
+	// Branch is the branch created for this worktree's task.
+	Branch    string
 	Status    string
 	Processes []process.ProcessInfo
 	// LeaseID identifies the current acquisition of a leased worktree.
@@ -38,14 +40,22 @@ type WorktreeStatus struct {
 
 // LeaseInfo is the stable machine-readable identity of one lease acquisition.
 type LeaseInfo struct {
-	Path        string    `json:"path"`
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+	// Resumed reports that Branch already existed and was checked out rather
+	// than created, meaning this task carries earlier work.
+	Resumed     bool      `json:"resumed"`
 	LeaseID     string    `json:"lease_id"`
 	LeaseHolder string    `json:"lease_holder"`
 	LeasedAt    time.Time `json:"leased_at"`
 }
 
-// acquireOptions controls how Acquire reserves the worktree it hands out.
+// acquireOptions controls how Acquire creates the worktree it hands out.
 type acquireOptions struct {
+	// slug is the task name. It is used verbatim as both the worktree
+	// directory name and the branch name, so it must already be sanitized
+	// by the slug package.
+	slug string
 	// lease records a durable, process-independent reservation instead of the
 	// default short-lived owner reservation.
 	lease bool
@@ -57,31 +67,39 @@ type acquireOptions struct {
 	hookStderr io.Writer
 }
 
-// Acquire reserves a clean worktree from the pool with a short-lived owner
-// reservation (the calling process). It is the backing call for the interactive
-// `treehouse get` subshell.
-func Acquire(repoRoot, poolDir string, poolSize int, postCreate []string) (string, error) {
-	acquired, err := acquire(repoRoot, poolDir, poolSize, postCreate, acquireOptions{
-		hookStdout: os.Stdout,
-		hookStderr: os.Stderr,
-	})
+// Acquire creates a worktree named slug, checked out on a new branch named
+// slug, with a short-lived owner reservation (the calling process). It is the
+// backing call for the interactive `treehouse get` subshell.
+func Acquire(repoRoot, poolDir, slug string, poolSize int, postCreate []string) (string, error) {
+	acquired, err := AcquireInfo(repoRoot, poolDir, slug, poolSize, postCreate)
 	return acquired.Path, err
 }
 
-// AcquireLease reserves a clean worktree and marks it durably LEASED so the
-// reservation survives with zero processes running inside it. The lease persists
+// AcquireInfo creates a worktree exactly like Acquire and returns the whole
+// allocation, including whether it resumed an existing branch.
+func AcquireInfo(repoRoot, poolDir, slug string, poolSize int, postCreate []string) (LeaseInfo, error) {
+	return acquire(repoRoot, poolDir, poolSize, postCreate, acquireOptions{
+		slug:       slug,
+		hookStdout: os.Stdout,
+		hookStderr: os.Stderr,
+	})
+}
+
+// AcquireLease creates a worktree exactly like Acquire and marks it durably
+// LEASED so the reservation survives with zero processes running inside it. The lease persists
 // until it is released by Release. holder is an optional label recorded with the
 // lease for diagnostics. Post-create hook stdout is routed to stderr so callers
 // can emit machine-readable allocation output without hook output on stdout.
-func AcquireLease(repoRoot, poolDir string, poolSize int, postCreate []string, holder string) (string, error) {
-	lease, err := AcquireLeaseInfo(repoRoot, poolDir, poolSize, postCreate, holder)
+func AcquireLease(repoRoot, poolDir, slug string, poolSize int, postCreate []string, holder string) (string, error) {
+	lease, err := AcquireLeaseInfo(repoRoot, poolDir, slug, poolSize, postCreate, holder)
 	return lease.Path, err
 }
 
-// AcquireLeaseInfo reserves a worktree exactly like AcquireLease and returns
+// AcquireLeaseInfo creates a worktree exactly like AcquireLease and returns
 // the immutable identity and metadata for that acquisition.
-func AcquireLeaseInfo(repoRoot, poolDir string, poolSize int, postCreate []string, holder string) (LeaseInfo, error) {
+func AcquireLeaseInfo(repoRoot, poolDir, slug string, poolSize int, postCreate []string, holder string) (LeaseInfo, error) {
 	return acquire(repoRoot, poolDir, poolSize, postCreate, acquireOptions{
+		slug:        slug,
 		lease:       true,
 		leaseHolder: holder,
 		hookStdout:  os.Stderr,
@@ -89,8 +107,16 @@ func AcquireLeaseInfo(repoRoot, poolDir string, poolSize int, postCreate []strin
 	})
 }
 
+// acquire creates a new worktree named for the task and checks it out on a new
+// branch of the same name. Worktrees are never recycled between tasks: the
+// directory name and the branch name both encode the task, so a worktree can
+// only ever serve the task it was created for.
 func acquire(repoRoot, poolDir string, poolSize int, postCreate []string, opts acquireOptions) (LeaseInfo, error) {
-	branch, err := git.GetDefaultBranch(repoRoot)
+	if opts.slug == "" {
+		return LeaseInfo{}, fmt.Errorf("a task name is required to create a worktree")
+	}
+
+	base, err := git.GetDefaultBranch(repoRoot)
 	if err != nil {
 		return LeaseInfo{}, err
 	}
@@ -100,6 +126,12 @@ func acquire(repoRoot, poolDir string, poolSize int, postCreate []string, opts a
 		if err := git.Fetch(repoRoot); err != nil {
 			return LeaseInfo{}, fmt.Errorf("fetch failed: %w", err)
 		}
+	}
+
+	// The state lock lives inside poolDir, so the directory has to exist
+	// before the lock is taken.
+	if err := os.MkdirAll(poolDir, 0755); err != nil {
+		return LeaseInfo{}, err
 	}
 
 	var acquired LeaseInfo
@@ -113,54 +145,41 @@ func acquire(repoRoot, poolDir string, poolSize int, postCreate []string, opts a
 
 		state = healState(state)
 
-		// Try to find an available worktree (clean, not in-use, not leased)
-		for i, wt := range state.Worktrees {
-			if wt.Destroying || wt.Leased || ownerAlive(wt) {
-				continue
+		wtPath := filepath.Join(poolDir, opts.slug)
+
+		for _, wt := range state.Worktrees {
+			if wt.Name == opts.slug || wt.Path == wtPath {
+				return fmt.Errorf("a worktree for %q already exists at %s. Run 'treehouse enter %s' to resume it, 'treehouse return %s' to finish it, or use a different description", opts.slug, wt.Path, wt.Path, wt.Path)
 			}
-			inUse, _ := process.IsWorktreeInUse(wt.Path)
-			if inUse {
-				continue
-			}
-			dirty, _ := git.IsDirty(wt.Path)
-			if dirty {
-				continue
-			}
-			// Found an available one — reset it
-			if err := git.ResetWorktree(wt.Path, branch); err != nil {
-				continue
-			}
-			if err := markAcquired(&state.Worktrees[i], opts); err != nil {
-				return err
-			}
-			acquired = leaseInfoFromEntry(state.Worktrees[i])
-			if err := WriteState(poolDir, state); err != nil {
-				return err
-			}
-			runPostCreate = true
-			return nil
 		}
 
-		// No available worktree — create new if pool allows
 		if len(state.Worktrees) >= poolSize {
-			return fmt.Errorf("all %d worktrees are in use or dirty (max_trees = %d). Run 'treehouse status' to see details, or increase max_trees in treehouse.toml", len(state.Worktrees), poolSize)
+			return fmt.Errorf("%d worktrees already exist (max_trees = %d). Run 'treehouse status' to see them, return the ones you have finished, or increase max_trees in treehouse.toml", len(state.Worktrees), poolSize)
 		}
 
-		name := nextName(state)
-		repoName := filepath.Base(repoRoot)
-		wtPath := filepath.Join(poolDir, name, repoName)
-
-		if err := os.MkdirAll(filepath.Dir(wtPath), 0755); err != nil {
+		// Fail before touching git if either name is already taken, so the
+		// user gets an explanation instead of a raw git error.
+		if _, err := os.Stat(wtPath); err == nil {
+			return fmt.Errorf("%s already exists but is not managed by treehouse. Remove it or use a different description", wtPath)
+		} else if !os.IsNotExist(err) {
 			return err
 		}
-
-		if err := git.AddWorktree(repoRoot, wtPath, branch); err != nil {
+		// A branch outlives the worktree it was created in, so an existing
+		// branch means this task was worked on before. Resume it rather than
+		// refusing the name or starting a second branch for the same task.
+		resumed := git.BranchExists(repoRoot, opts.slug)
+		if resumed {
+			if err := git.AddWorktreeOnBranch(repoRoot, wtPath, opts.slug); err != nil {
+				return fmt.Errorf("failed to create worktree on existing branch %s: %w", opts.slug, err)
+			}
+		} else if err := git.AddWorktreeWithBranch(repoRoot, wtPath, opts.slug, base); err != nil {
 			return fmt.Errorf("failed to create worktree: %w", err)
 		}
 
 		entry := WorktreeEntry{
-			Name:      name,
+			Name:      opts.slug,
 			Path:      wtPath,
+			Branch:    opts.slug,
 			CreatedAt: time.Now(),
 		}
 		if err := markAcquired(&entry, opts); err != nil {
@@ -169,6 +188,7 @@ func acquire(repoRoot, poolDir string, poolSize int, postCreate []string, opts a
 		state.Worktrees = append(state.Worktrees, entry)
 
 		acquired = leaseInfoFromEntry(entry)
+		acquired.Resumed = resumed
 		if err := WriteState(poolDir, state); err != nil {
 			return err
 		}
@@ -188,6 +208,7 @@ func acquire(repoRoot, poolDir string, poolSize int, postCreate []string, opts a
 func leaseInfoFromEntry(wt WorktreeEntry) LeaseInfo {
 	return LeaseInfo{
 		Path:        wt.Path,
+		Branch:      wt.Branch,
 		LeaseID:     wt.LeaseID,
 		LeaseHolder: wt.LeaseHolder,
 		LeasedAt:    wt.LeasedAt,
@@ -225,8 +246,9 @@ type ReleasePreconditions struct {
 	ExpectedLeaseHolder *string
 }
 
-// Release resets a managed worktree, clears its short-lived owner reservation or
-// durable lease, and returns it to the available pool. It retains the legacy
+// Release finishes a managed worktree: it removes the worktree directory and
+// drops its state entry. The branch is deliberately left in the repository, so
+// committed work and any open PR survive the return. It retains the legacy
 // unconditional behavior of releasing by path.
 func Release(poolDir, worktreePath string) error {
 	return ReleaseConditional(poolDir, worktreePath, ReleasePreconditions{}, nil)
@@ -245,16 +267,15 @@ func ValidateReleasePreconditions(poolDir, worktreePath string, preconditions Re
 	})
 }
 
-// ReleaseConditional verifies any lease preconditions, runs beforeReset, resets
-// the worktree, and clears its reservation while holding one state lock. The
-// callback is invoked only after all preconditions match and runs under that
-// lock so caller-side termination or detachment cannot race a later acquisition.
-func ReleaseConditional(poolDir, worktreePath string, preconditions ReleasePreconditions, beforeReset func() error) error {
+// ReleaseConditional verifies any lease preconditions, runs beforeRemove,
+// removes the worktree, and drops its state entry while holding one state lock.
+// The callback is invoked only after all preconditions match and runs under that
+// lock so caller-side termination cannot race another command.
+//
+// The worktree's branch is NOT deleted. Removing the directory reclaims the
+// checkout; the commits on the branch stay in the repository.
+func ReleaseConditional(poolDir, worktreePath string, preconditions ReleasePreconditions, beforeRemove func() error) error {
 	repoRoot, err := git.FindRepoRootFrom(worktreePath)
-	if err != nil {
-		return err
-	}
-	branch, err := git.GetDefaultBranch(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -264,41 +285,42 @@ func ReleaseConditional(poolDir, worktreePath string, preconditions ReleasePreco
 			return err
 		}
 
-		wt, err := releasableWorktree(&state, worktreePath, preconditions)
+		index, err := releasableWorktree(&state, worktreePath, preconditions)
 		if err != nil {
 			return err
 		}
-		if beforeReset != nil {
-			if err := beforeReset(); err != nil {
+		if beforeRemove != nil {
+			if err := beforeRemove(); err != nil {
 				return err
 			}
 		}
-		if err := git.ResetWorktree(worktreePath, branch); err != nil {
+		if err := git.RemoveWorktree(repoRoot, worktreePath); err != nil {
 			return err
 		}
 
-		wt.OwnerPID = 0
-		wt.OwnerStartedAt = 0
-		clearLease(wt)
+		state.Worktrees = append(state.Worktrees[:index], state.Worktrees[index+1:]...)
 		return WriteState(poolDir, state)
 	})
 }
 
-func releasableWorktree(state *State, worktreePath string, preconditions ReleasePreconditions) (*WorktreeEntry, error) {
+// releasableWorktree returns the index of the managed entry for worktreePath
+// once it satisfies preconditions. An index (not a pointer) is returned because
+// the caller removes the entry from the slice.
+func releasableWorktree(state *State, worktreePath string, preconditions ReleasePreconditions) (int, error) {
 	for i := range state.Worktrees {
 		wt := &state.Worktrees[i]
 		if wt.Path != worktreePath {
 			continue
 		}
 		if wt.Destroying {
-			return nil, fmt.Errorf("worktree %s is being destroyed", worktreePath)
+			return 0, fmt.Errorf("worktree %s is being destroyed", worktreePath)
 		}
 		if err := validateReleasePreconditions(*wt, preconditions); err != nil {
-			return nil, err
+			return 0, err
 		}
-		return wt, nil
+		return i, nil
 	}
-	return nil, fmt.Errorf("worktree %s is not managed by treehouse", worktreePath)
+	return 0, fmt.Errorf("worktree %s is not managed by treehouse", worktreePath)
 }
 
 func validateReleasePreconditions(wt WorktreeEntry, preconditions ReleasePreconditions) error {
@@ -342,6 +364,7 @@ func List(poolDir string) ([]WorktreeStatus, error) {
 			ws := WorktreeStatus{
 				Name:   wt.Name,
 				Path:   wt.Path,
+				Branch: wt.Branch,
 				Status: StatusAvailable,
 			}
 

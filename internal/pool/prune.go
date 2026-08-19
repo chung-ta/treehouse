@@ -494,13 +494,13 @@ func executePrune(poolDir string, plan prunePlan, options PruneOptions) (PruneRe
 			}
 
 			if worktree.Orphaned {
-				container, err := removableWorktreeContainer(worktree.Path)
+				dir, err := removableWorktreeDir(worktree.Path)
 				if err != nil {
 					clearReservation(&state.Worktrees[idx])
 					result.Skipped = append(result.Skipped, newPruneSkipped(worktree.Name, worktree.Path, pruneSkipCleanupFailed, "refusing unsafe cleanup path", err.Error()))
 					continue
 				}
-				if err := os.RemoveAll(container); err != nil {
+				if err := os.RemoveAll(dir); err != nil {
 					clearReservation(&state.Worktrees[idx])
 					result.Skipped = append(result.Skipped, newPruneSkipped(worktree.Name, worktree.Path, pruneSkipCleanupFailed, "could not remove worktree directory", err.Error()))
 					continue
@@ -511,13 +511,13 @@ func executePrune(poolDir string, plan prunePlan, options PruneOptions) (PruneRe
 					result.Skipped = append(result.Skipped, newPruneSkipped(worktree.Name, worktree.Path, pruneSkipRemoveFailed, "git refused to remove worktree", err.Error()))
 					continue
 				}
-				container, err := removableWorktreeContainer(worktree.Path)
+				dir, err := removableWorktreeDir(worktree.Path)
 				if err != nil {
 					clearReservation(&state.Worktrees[idx])
 					result.Skipped = append(result.Skipped, newPruneSkipped(worktree.Name, worktree.Path, pruneSkipCleanupFailed, "refusing unsafe cleanup path", err.Error()))
 					continue
 				}
-				if err := os.RemoveAll(container); err != nil {
+				if err := os.RemoveAll(dir); err != nil {
 					clearReservation(&state.Worktrees[idx])
 					result.Skipped = append(result.Skipped, newPruneSkipped(worktree.Name, worktree.Path, pruneSkipCleanupFailed, "could not remove worktree directory", err.Error()))
 					continue
@@ -605,11 +605,11 @@ func finalOrphanPruneSafetyCheck(wt WorktreeEntry) (PruneWorktree, PruneSkipped)
 		return worktree, newPruneSkipped(wt.Name, wt.Path, PruneSkipOrphanedBackingRepo, pruneOrphanRecoveredRepository, detail)
 	}
 
-	container, err := removableWorktreeContainer(worktree.Path)
+	dir, err := removableWorktreeDir(worktree.Path)
 	if err != nil {
 		return worktree, newPruneSkipped(wt.Name, wt.Path, pruneSkipCannotMeasureSize, "refusing unsafe cleanup path", err.Error())
 	}
-	bytes, err := dirSize(container)
+	bytes, err := dirSize(dir)
 	if err != nil {
 		return worktree, newPruneSkipped(wt.Name, wt.Path, pruneSkipCannotMeasureSize, "cannot measure size", err.Error())
 	}
@@ -624,12 +624,12 @@ func analyzeIdleWorktree(resolveContext pruneContextResolver, wt WorktreeEntry, 
 			return worktree, skipped, true, pruneContext{}, nil
 		}
 
-		container, err := removableWorktreeContainer(worktree.Path)
+		dir, err := removableWorktreeDir(worktree.Path)
 		if err != nil {
 			skipped = newPruneSkipped(wt.Name, wt.Path, pruneSkipCannotMeasureSize, "refusing unsafe cleanup path", err.Error())
 			return worktree, skipped, true, pruneContext{}, nil
 		}
-		bytes, err := dirSize(container)
+		bytes, err := dirSize(dir)
 		if err != nil {
 			skipped = newPruneSkipped(wt.Name, wt.Path, pruneSkipCannotMeasureSize, "cannot measure size", err.Error())
 			return worktree, skipped, true, pruneContext{}, nil
@@ -674,12 +674,12 @@ func analyzeIdleWorktree(resolveContext pruneContextResolver, wt WorktreeEntry, 
 		return worktree, skipped, true, context, nil
 	}
 
-	container, err := removableWorktreeContainer(worktree.Path)
+	dir, err := removableWorktreeDir(worktree.Path)
 	if err != nil {
 		skipped = newPruneSkipped(wt.Name, wt.Path, pruneSkipCannotMeasureSize, "refusing unsafe cleanup path", err.Error())
 		return worktree, skipped, true, context, nil
 	}
-	bytes, err := dirSize(container)
+	bytes, err := dirSize(dir)
 	if err != nil {
 		skipped = newPruneSkipped(wt.Name, wt.Path, pruneSkipCannotMeasureSize, "cannot measure size", err.Error())
 		return worktree, skipped, true, context, nil
@@ -773,12 +773,16 @@ func linkedWorktreeGitDir(worktreePath string) (string, bool, string) {
 	return filepath.Clean(gitDir), true, ""
 }
 
-func removableWorktreeContainer(worktreePath string) (string, error) {
-	container := filepath.Clean(filepath.Dir(worktreePath))
-	if container == "." || filepath.Dir(container) == container {
-		return "", fmt.Errorf("refusing to remove %s", container)
+// removableWorktreeDir returns the directory to delete for a worktree. A
+// worktree directory is named for its task and sits directly inside the pool
+// directory, so only that directory is ever removed - never its parent, which
+// is the pool itself.
+func removableWorktreeDir(worktreePath string) (string, error) {
+	dir := filepath.Clean(worktreePath)
+	if dir == "." || filepath.Dir(dir) == dir {
+		return "", fmt.Errorf("refusing to remove %s", dir)
 	}
-	return container, nil
+	return dir, nil
 }
 
 func clearReservation(wt *WorktreeEntry) {

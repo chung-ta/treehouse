@@ -160,7 +160,7 @@ func resolveDestroyPoolFromTarget(targetPath string) (string, error) {
 	if pool.IsPoolDir(abs) {
 		return abs, nil
 	}
-	if candidate := filepath.Dir(filepath.Dir(abs)); pool.IsPoolDir(candidate) {
+	if candidate := filepath.Dir(abs); pool.IsPoolDir(candidate) {
 		return candidate, nil
 	}
 

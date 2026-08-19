@@ -26,6 +26,7 @@ type statusJSONProcess struct {
 type statusJSONWorktree struct {
 	Name        string              `json:"name"`
 	Path        string              `json:"path"`
+	Branch      string              `json:"branch"`
 	Status      string              `json:"status"`
 	LeaseID     string              `json:"lease_id"`
 	LeaseHolder string              `json:"lease_holder"`
@@ -75,6 +76,15 @@ var statusCmd = &cobra.Command{
 		// statusWidth must be >= longest status string ("you're here" = 11)
 		const statusWidth = 11
 
+		// Names are task slugs now, so the column is sized to the widest one
+		// instead of the old fixed width for "wt-N"-style names.
+		nameWidth := 4
+		for _, wt := range worktrees {
+			if len(wt.Name) > nameWidth {
+				nameWidth = len(wt.Name)
+			}
+		}
+
 		for _, wt := range worktrees {
 			var status string
 			switch wt.Status {
@@ -90,9 +100,9 @@ var statusCmd = &cobra.Command{
 				status = cyan(wt.Status)
 			}
 
-			// "%-4s  %-11s  " = 4 + 2 + 11 + 2 = 19 chars before path
 			statusPad := strings.Repeat(" ", statusWidth-len(wt.Status))
-			line := fmt.Sprintf("%-4s  %s%s  %s", wt.Name, status, statusPad, ui.PrettyPath(wt.Path))
+			namePad := strings.Repeat(" ", nameWidth-len(wt.Name))
+			line := fmt.Sprintf("%s%s  %s%s  %s", wt.Name, namePad, status, statusPad, ui.PrettyPath(wt.Path))
 			if wt.Status == pool.StatusLeased && wt.LeaseHolder != "" {
 				line += fmt.Sprintf("  (held by %s)", wt.LeaseHolder)
 			}
@@ -103,7 +113,7 @@ var statusCmd = &cobra.Command{
 				for _, p := range wt.Processes {
 					procStrs = append(procStrs, p.String())
 				}
-				fmt.Fprintf(os.Stdout, "%s%s\n", strings.Repeat(" ", 4+2+statusWidth+2), strings.Join(procStrs, ", "))
+				fmt.Fprintf(os.Stdout, "%s%s\n", strings.Repeat(" ", nameWidth+2+statusWidth+2), strings.Join(procStrs, ", "))
 			}
 		}
 		return nil
@@ -121,6 +131,7 @@ func writeStatusJSON(worktrees []pool.WorktreeStatus) error {
 		item := statusJSONWorktree{
 			Name:        wt.Name,
 			Path:        wt.Path,
+			Branch:      wt.Branch,
 			Status:      wt.Status,
 			LeaseID:     wt.LeaseID,
 			LeaseHolder: wt.LeaseHolder,

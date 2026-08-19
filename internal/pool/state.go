@@ -11,8 +11,12 @@ import (
 )
 
 type WorktreeEntry struct {
-	Name           string    `json:"name"`
-	Path           string    `json:"path"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Branch is the branch created for this worktree's task. It shares the
+	// worktree's name. Entries written before named worktrees decode with an
+	// empty Branch and are reported as detached.
+	Branch         string    `json:"branch,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	Destroying     bool      `json:"destroying,omitempty"`
 	OwnerPID       int32     `json:"owner_pid,omitempty"`
@@ -109,32 +113,25 @@ func recoverCorruptState(poolDir string, parseErr error) (State, error) {
 		if !slot.IsDir() {
 			continue
 		}
-		slotDir := filepath.Join(poolDir, slot.Name())
-		nested, err := os.ReadDir(slotDir)
-		if err != nil {
-			return State{}, fmt.Errorf("state file %s is corrupt or truncated (%v), and recovery could not scan %s: %w", stateFilePath(poolDir), parseErr, slotDir, err)
-		}
-		for _, n := range nested {
-			if !n.IsDir() {
-				continue
+		wtPath := filepath.Join(poolDir, slot.Name())
+		if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
+			if !os.IsNotExist(err) {
+				return State{}, fmt.Errorf("state file %s is corrupt or truncated (%v), and recovery could not inspect %s: %w", stateFilePath(poolDir), parseErr, wtPath, err)
 			}
-			wtPath := filepath.Join(slotDir, n.Name())
-			if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
-				if !os.IsNotExist(err) {
-					return State{}, fmt.Errorf("state file %s is corrupt or truncated (%v), and recovery could not inspect %s: %w", stateFilePath(poolDir), parseErr, wtPath, err)
-				}
-				continue
-			}
-			now := time.Now()
-			recovered = append(recovered, WorktreeEntry{
-				Name:        slot.Name(),
-				Path:        wtPath,
-				CreatedAt:   now,
-				Leased:      true,
-				LeaseHolder: recoveredLeaseHolder,
-				LeasedAt:    now,
-			})
+			continue
 		}
+		now := time.Now()
+		recovered = append(recovered, WorktreeEntry{
+			Name: slot.Name(),
+			Path: wtPath,
+			// The directory name is the slug, which is also the branch name,
+			// but the checkout could have been moved off it since. Recovery
+			// records only what the directory layout proves.
+			CreatedAt:   now,
+			Leased:      true,
+			LeaseHolder: recoveredLeaseHolder,
+			LeasedAt:    now,
+		})
 	}
 	fmt.Fprintf(os.Stderr, "treehouse: WARNING: state file %s is corrupt or truncated (%v); recovering from worktrees found on disk. They are marked leased until verified - see `treehouse status`, then `treehouse return` or `treehouse destroy --include-leased`.\n", stateFilePath(poolDir), parseErr)
 	return State{Worktrees: recovered}, nil

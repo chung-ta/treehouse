@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
-	"github.com/kunchenguid/treehouse/internal/git"
 )
 
 type Config struct {
@@ -84,23 +83,15 @@ func loadUser() (Config, bool, error) {
 	return cfg, false, nil
 }
 
+// ResolvePoolDir resolves the directory holding one repository's worktrees.
+// The repository name is the basename of its root, so worktrees live at a path
+// a human can read and type: <root>/<repo>/<slug>.
 func ResolvePoolDir(repoRoot string, root string) (string, error) {
-	// Use remote URL for the hash when available; fall back to the
-	// absolute repo path for purely-local repositories.
-	hashInput, err := git.GetRemoteURL(repoRoot)
-	if err != nil {
-		hashInput = repoRoot
-	}
-
-	repoName := filepath.Base(repoRoot)
-	shortHash := git.ShortHash(hashInput)
-	poolName := repoName + "-" + shortHash
-
 	poolRoot, err := ResolvePoolRoot(repoRoot, root)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(poolRoot, poolName), nil
+	return filepath.Join(poolRoot, filepath.Base(repoRoot)), nil
 }
 
 // ResolvePoolRoot resolves the directory that contains per-repository pools.
@@ -122,5 +113,5 @@ func ResolvePoolRoot(repoRoot string, root string) (string, error) {
 		}
 		expanded = filepath.Join(repoRoot, expanded)
 	}
-	return filepath.Join(expanded, ".treehouse"), nil
+	return expanded, nil
 }

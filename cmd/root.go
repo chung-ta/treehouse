@@ -18,9 +18,13 @@ func SetVersion(v string) {
 
 var rootCmd = &cobra.Command{
 	Use:   "treehouse",
-	Short: "Manage a pool of git worktrees for parallel AI agent workflows",
-	Long: `Treehouse maintains a pool of reusable, pre-warmed git worktrees
-so that multiple AI coding agents can work on the same repo in parallel.`,
+	Short: "Manage per-task git worktrees for parallel AI agent workflows",
+	Long: `Treehouse gives every task its own git worktree and branch, so that
+multiple AI coding agents can work on the same repo in parallel.
+
+Run it with a task description to create one:
+
+  treehouse "fix login redirect"`,
 	Version:       version,
 	SilenceUsage:  true,
 	SilenceErrors: true,

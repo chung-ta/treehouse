@@ -129,8 +129,8 @@ func TestWriteState_InterruptedWriteNeverTouchesLiveFile(t *testing.T) {
 // mark them leased so nothing gets silently handed out or destroyed.
 func TestReadState_RecoversFromEmptyFile(t *testing.T) {
 	poolDir := t.TempDir()
-	makeFakeWorktree(t, poolDir, "1", "myrepo")
-	makeFakeWorktree(t, poolDir, "2", "myrepo")
+	makeFakeWorktree(t, poolDir, "1")
+	makeFakeWorktree(t, poolDir, "2")
 
 	if err := os.WriteFile(stateFilePath(poolDir), nil, 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -159,7 +159,7 @@ func TestReadState_RecoversFromEmptyFile(t *testing.T) {
 // as a fully empty file.
 func TestReadState_RecoversFromPartiallyWrittenFile(t *testing.T) {
 	poolDir := t.TempDir()
-	makeFakeWorktree(t, poolDir, "1", "myrepo")
+	makeFakeWorktree(t, poolDir, "1")
 
 	full, err := json.MarshalIndent(State{Worktrees: []WorktreeEntry{
 		{Name: "1", Path: filepath.Join(poolDir, "1", "myrepo")},
@@ -187,7 +187,7 @@ func TestReadState_RecoversFromPartiallyWrittenFile(t *testing.T) {
 // same path as) a worktree that still exists on disk.
 func TestReadState_RecoveredWorktreesBlockAcquire(t *testing.T) {
 	repoDir, poolDir := setupLocalRepo(t)
-	if _, err := Acquire(repoDir, poolDir, 1, nil); err != nil {
+	if _, err := Acquire(repoDir, poolDir, "task-01", 1, nil); err != nil {
 		t.Fatalf("Acquire: %v", err)
 	}
 
@@ -195,7 +195,7 @@ func TestReadState_RecoveredWorktreesBlockAcquire(t *testing.T) {
 		t.Fatalf("truncate state file: %v", err)
 	}
 
-	if _, err := Acquire(repoDir, poolDir, 1, nil); err == nil {
+	if _, err := Acquire(repoDir, poolDir, "task-02", 1, nil); err == nil {
 		t.Fatal("Acquire after state corruption should refuse to hand out the pool's only worktree, got nil error")
 	}
 
@@ -208,13 +208,15 @@ func TestReadState_RecoveredWorktreesBlockAcquire(t *testing.T) {
 	}
 }
 
-func makeFakeWorktree(t *testing.T, poolDir, slot, repoName string) string {
+// makeFakeWorktree creates a worktree directory directly inside poolDir, the
+// layout recovery scans: <poolDir>/<slug>.
+func makeFakeWorktree(t *testing.T, poolDir, slug string) string {
 	t.Helper()
-	wtPath := filepath.Join(poolDir, slot, repoName)
+	wtPath := filepath.Join(poolDir, slug)
 	if err := os.MkdirAll(wtPath, 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(wtPath, ".git"), []byte("gitdir: ../../fake.git\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(wtPath, ".git"), []byte("gitdir: ../fake.git\n"), 0644); err != nil {
 		t.Fatalf("WriteFile .git: %v", err)
 	}
 	return wtPath
