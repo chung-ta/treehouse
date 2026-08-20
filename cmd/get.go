@@ -30,12 +30,18 @@ var getCmd = &cobra.Command{
 	Short: "Create a worktree for a task and open a subshell",
 	Long: `Create a worktree for a task and open a subshell in it.
 
-The description is required and must be at least 10 characters. Its first 10
+The description is required and must be at least 10 characters. Its first 12
 characters, with spaces turned into dashes, become both the worktree directory
 name and the branch name:
 
   treehouse get "fix login redirect"
-  -> <root>/<repo>/fix-login  on branch  fix-login
+  -> <root>/<repo>/fix-login-re  on branch  fix-login-re
+
+A description carrying an RV2- ticket id is named from that id instead, wherever
+it appears in the sentence, so the ticket leads the branch name:
+
+  treehouse get "work on RV2-64171 TEAM1 organization"
+  -> <root>/<repo>/RV2-64171-TEAM1-organi  on branch  RV2-64171-TEAM1-organi
 
 The worktree is checked out on that branch, so the work can be committed,
 pushed, and turned into a PR without any further setup. Worktrees are not
