@@ -20,7 +20,7 @@ Or... are you starting a new worktree for every agent session, losing all your i
 
 Treehouse gives every task its own isolated worktree and branch, so each of your agents gets its own environment instantly — no cloning, no conflicts, no coordination overhead.
 
-- **A worktree per task** — `treehouse "fix login redirect"` puts you in a clean worktree at `<root>/<repo>/fix-login`, checked out on branch `fix-login`.
+- **A worktree per task** — `treehouse "fix login redirect"` puts you in a clean worktree at `<root>/<repo>/fix-login-re`, checked out on branch `fix-login-re`.
 - **PR-ready** — the worktree is on a real branch from the moment it exists, so you can commit, push, and open a PR without any setup.
 - **Conflict-free** — automatic detection of in-use worktrees and your agents never step on each other's toes.
 
@@ -29,23 +29,27 @@ Treehouse gives every task its own isolated worktree and branch, so each of your
 ```sh
 $ cd myproject                          # start in your repo as usual
 $ treehouse "fix login redirect"        # a worktree + branch for this task
-🌳 Entered worktree at ~/.treehouse/myproject/fix-login. Type 'exit' to leave.
-🌳 On branch fix-login.
+🌳 Entered worktree at ~/.treehouse/myproject/fix-login-re. Type 'exit' to leave.
+🌳 On branch fix-login-re.
 
 # You're now in an isolated worktree, on a branch named for the task.
 # Run your AI agent, make changes, commit, push, open a PR.
 
 $ exit                                  # leave the subshell
-🌳 Worktree kept at ~/.treehouse/myproject/fix-login (branch fix-login).
+🌳 Worktree kept at ~/.treehouse/myproject/fix-login-re (branch fix-login-re).
 🌳 Resume it with 'treehouse enter ...', or finish it with 'treehouse return ...'.
 
-$ treehouse return ~/.treehouse/myproject/fix-login   # done with the task
+$ treehouse return ~/.treehouse/myproject/fix-login-re   # done with the task
 🌳 Worktree removed. Its branch is still in the repository.
 ```
 
-The description is required and must be at least 10 characters. Its first 10
+The description is required and must be at least 10 characters. Its first 12
 characters, with spaces turned into dashes, become both the directory name and
 the branch name.
+
+A description carrying an `RV2-` ticket id is named from that id instead —
+wherever it appears in the sentence — so the ticket leads the branch name:
+`"work on RV2-64171 TEAM1 organization"` becomes `RV2-64171-TEAM1-organi`.
 
 ## Install
 
@@ -103,7 +107,7 @@ The default treehouse root is `~/.treehouse/`, giving `~/.treehouse/<repo>/<task
       │
       ▼
   Slug the description
-  ("fix login redirect" -> "fix-login")
+  ("fix login redirect" -> "fix-login-re")
       │
       ▼
   git fetch origin
@@ -119,8 +123,8 @@ The default treehouse root is `~/.treehouse/`, giving `~/.treehouse/<repo>/<task
          yes/ \no
            /   \
           ▼     ▼
-   Refuse and  Create <root>/<repo>/fix-login
-   point you   on branch fix-login (created at
+   Refuse and  Create <root>/<repo>/fix-login-re
+   point you   on branch fix-login-re (created at
    at it       the default branch tip, or resumed
                if the branch already exists)
           \   /

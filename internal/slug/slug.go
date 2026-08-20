@@ -3,7 +3,7 @@
 //
 // A description carrying a YouTrack ticket id is slugged from that id: the
 // window starts at TicketPrefix and runs TicketLength runes past it, so
-// "add pagination to RV2-72377 BEplutus ROAR" yields "RV2-72377-BEplutus".
+// "add pagination to RV2-72377 BEplutus ROAR" yields "RV2-72377-BEplutus-ROA".
 // Ticket ids are what tasks are searched, branched, and talked about by, so
 // they belong at the front of the name even when the sentence buries them.
 //
@@ -33,9 +33,11 @@ const Length = 12
 // ordinary prose ("rv2 rewrite", "Revision 2") is not mistaken for a ticket.
 const TicketPrefix = "RV2-"
 
-// TicketLength is how many runes past TicketPrefix are kept, enough for the
-// issue number plus the start of its title.
-const TicketLength = 10
+// TicketLength is how many runes past TicketPrefix are kept: the issue number
+// plus enough of the title to tell two tasks on one ticket apart. Sized from
+// real descriptions — at 10 or 14, "RV2-72377 fix the login bug" and
+// "RV2-72377 fix the logout bug" still collapse to the same slug.
+const TicketLength = 18
 
 // ErrTooShort reports a description below MinLength.
 type ErrTooShort struct {
@@ -53,7 +55,7 @@ type ErrEmptySlug struct {
 }
 
 func (e *ErrEmptySlug) Error() string {
-	return fmt.Sprintf("description %q has no usable characters in its first %d characters", e.Description, Length)
+	return fmt.Sprintf("description %q has no usable characters in the run used for the slug", e.Description)
 }
 
 // From converts a task description into a slug used as both the worktree
@@ -91,9 +93,13 @@ func From(description string) (string, error) {
 // a ticket id starts there and keeps TicketLength runes past the prefix, so the
 // id leads the name even when the sentence buries it; anything else takes the
 // first Length runes. Both windows are clamped to the available input.
+//
+// The prefix must be followed by a digit to count as a ticket. Without that
+// check a bare "RV2-" anywhere in the text sanitizes to the 3-rune slug "RV2",
+// and because an existing branch is resumed rather than refused, every such
+// description would silently share one worktree.
 func window(runes []rune) []rune {
-	if i := strings.Index(string(runes), TicketPrefix); i >= 0 {
-		start := len([]rune(string(runes)[:i]))
+	if start := ticketIndex(runes); start >= 0 {
 		end := start + len([]rune(TicketPrefix)) + TicketLength
 		if end > len(runes) {
 			end = len(runes)
@@ -104,6 +110,36 @@ func window(runes []rune) []rune {
 		return runes[:Length]
 	}
 	return runes
+}
+
+// ticketIndex reports the rune index where a ticket id starts, or -1 when the
+// description carries none. The prefix must be followed by a digit: a bare
+// "RV2-" would otherwise anchor the window on three runes that always survive
+// sanitization, so every such description would slug to "RV2" and silently
+// resume one another's worktree.
+//
+// Working in runes throughout avoids reconciling a byte offset from
+// strings.Index against a rune-indexed slice.
+func ticketIndex(runes []rune) int {
+	prefix := []rune(TicketPrefix)
+	for i := 0; i+len(prefix) < len(runes); i++ {
+		if !matchesAt(runes, i, prefix) {
+			continue
+		}
+		if unicode.IsDigit(runes[i+len(prefix)]) {
+			return i
+		}
+	}
+	return -1
+}
+
+func matchesAt(runes []rune, i int, prefix []rune) bool {
+	for j, r := range prefix {
+		if runes[i+j] != r {
+			return false
+		}
+	}
+	return true
 }
 
 // isRefUnsafe reports whether r is rejected by git-check-ref-format, or is a
